@@ -21,11 +21,6 @@ const cors = require('cors');
 const { Server } = require('socket.io');
 
 // ---------------- Push notifications (FCM) ----------------
-// Optional and self-disabling: if FIREBASE_SERVICE_ACCOUNT_JSON isn't set
-// as an environment variable yet, push notifications are simply skipped
-// (a warning is logged once) rather than crashing the server. This lets
-// the chat itself work immediately, with push added once Firebase is set
-// up, without a redeploy-breaking dependency in between.
 let admin = null;
 let fcmEnabled = false;
 try {
@@ -43,15 +38,54 @@ try {
   console.log('[MOON] firebase-admin not usable yet -- push notifications disabled, chat still works normally.', e.message);
 }
 
-// Admin devices that should receive a push when a customer messages --
-// registered via POST /api/admin/fcm-token (the Android app calls this
-// once it has a token). A Set so the same device re-registering doesn't
-// create duplicates.
+const MANTLEDB_BASE = 'https://mantledb.sh/v2';
+const MANTLEDB_NAMESPACE = 'moonge-tbilisi-vc7f3q';
+const FCM_TOKENS_PATH = 'chat-server-fcm-admin-tokens';
 const adminFcmTokens = new Set();
 
+async function loadPersistedFcmTokens() {
+  try {
+    const resp = await fetch(`${MANTLEDB_BASE}/${MANTLEDB_NAMESPACE}/${FCM_TOKENS_PATH}`);
+    if (resp.status === 404) {
+      console.log('[MOON] No persisted FCM tokens found yet (first run, or none ever registered).');
+      return;
+    }
+    if (!resp.ok) {
+      console.log(`[MOON] Could not load persisted FCM tokens (HTTP ${resp.status}) -- starting with an empty set; devices will need to re-register.`);
+      return;
+    }
+    const data = await resp.json();
+    const list = Array.isArray(data.list) ? data.list : [];
+    list.forEach(t => adminFcmTokens.add(t));
+    console.log(`[MOON] Restored ${list.length} FCM token(s) from persistent storage -- survives this restart, no re-registration needed.`);
+  } catch (e) {
+    console.log('[MOON] Error loading persisted FCM tokens -- starting with an empty set:', e.message);
+  }
+}
+
+async function persistFcmTokens() {
+  try {
+    await fetch(`${MANTLEDB_BASE}/${MANTLEDB_NAMESPACE}/${FCM_TOKENS_PATH}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ list: Array.from(adminFcmTokens) })
+    });
+  } catch (e) {
+    console.log('[MOON] Error persisting FCM tokens (registration still works for this session, just won\'t survive a restart):', e.message);
+  }
+}
+
 async function notifyAdminsOfNewMessage(orderId, customerName, text) {
-  if (!fcmEnabled || adminFcmTokens.size === 0) return;
+  if (!fcmEnabled) {
+    console.log(`[MOON] Skipping push for order ${orderId} -- FCM not enabled (no FIREBASE_SERVICE_ACCOUNT_JSON).`);
+    return;
+  }
+  if (adminFcmTokens.size === 0) {
+    console.log(`[MOON] Skipping push for order ${orderId} -- FCM is enabled but zero admin devices are registered.`);
+    return;
+  }
   const tokens = Array.from(adminFcmTokens);
+  console.log(`[MOON] Sending push for order ${orderId} to ${tokens.length} device(s)...`);
   try {
     const resp = await admin.messaging().sendEachForMulticast({
       tokens,
@@ -59,15 +93,27 @@ async function notifyAdminsOfNewMessage(orderId, customerName, text) {
         title: customerName ? `${customerName} -- შეკვეთა #${orderId}` : `შეკვეთა #${orderId}`,
         body: text.slice(0, 200)
       },
-      data: { orderId }
+      data: { orderId },
+      android: {
+        priority: 'high',
+        notification: { channelId: 'moon_order_chat' }
+      }
     });
-    // Prune tokens the device itself has invalidated (uninstalled app,
-    // token rotated, etc.) so the set doesn't grow with dead entries.
+    const successCount = resp.responses.filter(r => r.success).length;
+    console.log(`[MOON] Push for order ${orderId}: ${successCount}/${tokens.length} delivered to FCM successfully.`);
+    resp.responses.forEach((r, i) => {
+      if (!r.success) {
+        console.log(`[MOON]   device ...${tokens[i].slice(-12)} failed: ${r.error?.code || r.error?.message}`);
+      }
+    });
+    let pruned = false;
     resp.responses.forEach((r, i) => {
       if (!r.success && (r.error?.code === 'messaging/registration-token-not-registered')) {
         adminFcmTokens.delete(tokens[i]);
+        pruned = true;
       }
     });
+    if (pruned) persistFcmTokens();
   } catch (e) {
     console.log('[MOON] FCM send failed (chat itself is unaffected):', e.message);
   }
@@ -80,7 +126,6 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-// orderId -> { customer, order, messages: [...], status: 'active'|'completed', createdAt }
 const sessions = new Map();
 
 function publicSession(orderId, session) {
@@ -94,35 +139,26 @@ function publicSession(orderId, session) {
   };
 }
 
-// ---------------- REST ----------------
-
-// Called by the site the moment a customer places an order (any of the
-// site's 5 order types -- main download, weekly/monthly subscription,
-// paid edit, cheap package). This is the direct replacement for
-// building a wa.me/t.me link.
 app.post('/api/sessions', (req, res) => {
   const { orderId, customer, order, firstMessage } = req.body;
   if (!orderId || !customer) {
     return res.status(400).json({ error: 'orderId and customer are required' });
   }
   const session = {
-    customer, // { discordId, username, avatarUrl }
-    order,    // { type, tiktok, price, details, ... } -- whatever the site already built for the old WA/TG message text
+    customer,
+    order,
     messages: firstMessage ? [firstMessage] : [],
     status: 'active',
     createdAt: Date.now()
   };
   sessions.set(orderId, session);
   io.to('admin_room').emit('new_session', publicSession(orderId, session));
+  if (firstMessage) {
+    notifyAdminsOfNewMessage(orderId, customer?.username, firstMessage.text || '');
+  }
   res.json({ ok: true, orderId });
 });
 
-// Looked up right after Discord login (and on page load, if already
-// logged in) so a customer who closes the chat -- or leaves and comes
-// back later, even on a different device -- can get straight back into
-// it instead of it just vanishing. Declared BEFORE /api/sessions/:orderId
-// below, since Express would otherwise match "by-customer" as if it
-// were an :orderId value.
 app.get('/api/sessions/by-customer/:discordId', (req, res) => {
   const discordId = req.params.discordId;
   const active = [];
@@ -141,7 +177,6 @@ app.get('/api/sessions/:orderId', (req, res) => {
   res.json(publicSession(req.params.orderId, session));
 });
 
-// Admin panel / Android app: list every currently-active chat.
 app.get('/api/sessions', (req, res) => {
   const active = [];
   for (const [orderId, session] of sessions.entries()) {
@@ -151,19 +186,17 @@ app.get('/api/sessions', (req, res) => {
   res.json(active);
 });
 
-app.get('/health', (req, res) => res.json({ ok: true, activeSessions: sessions.size, fcmEnabled }));
+app.get('/health', (req, res) => res.json({ ok: true, activeSessions: sessions.size, fcmEnabled, registeredAdminDevices: adminFcmTokens.size }));
 
-// Called once by the Android admin app after it obtains its FCM
-// registration token, so a new customer message can reach the admin's
-// phone even while the app is backgrounded or the site tab is closed.
 app.post('/api/admin/fcm-token', (req, res) => {
   const { token } = req.body;
   if (!token) return res.status(400).json({ error: 'token is required' });
+  const isNew = !adminFcmTokens.has(token);
   adminFcmTokens.add(token);
+  console.log(`[MOON] FCM token ${isNew ? 'registered' : 're-registered'} (...${token.slice(-12)}). Total devices: ${adminFcmTokens.size}. fcmEnabled=${fcmEnabled}`);
+  if (isNew) persistFcmTokens();
   res.json({ ok: true, fcmEnabled });
 });
-
-// ---------------- Socket.io ----------------
 
 io.on('connection', (socket) => {
   socket.on('join_order', ({ orderId }) => {
@@ -172,10 +205,6 @@ io.on('connection', (socket) => {
     socket.data.orderId = orderId;
   });
 
-  // The admin panel (site or Android app) joins this room once to
-  // receive "a new order came in" / "a customer replied" notifications
-  // for every session, without needing to join each order room
-  // individually.
   socket.on('join_admin', () => {
     socket.join('admin_room');
   });
@@ -184,30 +213,22 @@ io.on('connection', (socket) => {
     const session = sessions.get(orderId);
     if (!session || session.status !== 'active' || !message) return;
     const stored = {
-      from: message.from, // 'customer' | 'admin'
+      from: message.from,
       text: String(message.text || '').slice(0, 2000),
       ts: Date.now()
     };
     session.messages.push(stored);
     io.to(orderId).emit('new_message', stored);
-    // Lets the admin side show an unread badge / trigger a push
-    // notification even if it hasn't opened this specific order's room.
     io.to('admin_room').emit('admin_notify', {
       orderId,
       message: stored,
       customer: session.customer
     });
-    // Real push (FCM), for when the admin app is backgrounded or the
-    // site tab is closed entirely -- the socket-based admin_notify above
-    // only reaches a currently-open tab/app. Only fires for customer
-    // messages; the admin doesn't need a push for their own reply.
     if (stored.from === 'customer') {
       notifyAdminsOfNewMessage(orderId, session.customer?.username, stored.text);
     }
   });
 
-  // Admin panel's "Complete order" button -- closes the chat and tells
-  // the customer's tab to return to the homepage.
   socket.on('complete_order', ({ orderId }) => {
     const session = sessions.get(orderId);
     if (!session) return;
@@ -219,6 +240,9 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`MOON chat server listening on port ${PORT}`);
-});
+(async () => {
+  await loadPersistedFcmTokens();
+  server.listen(PORT, () => {
+    console.log(`MOON chat server listening on port ${PORT}`);
+  });
+})();
