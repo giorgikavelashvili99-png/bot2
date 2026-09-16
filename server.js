@@ -166,7 +166,13 @@ app.use(cors());
 app.use(express.json());
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+// Socket.io defaults to a 1MB max payload per packet, which a busy
+// photo can occasionally exceed and every video attachment definitely
+// does (the site caps raw video at 12MB, which becomes ~16MB once
+// base64-encoded for transport) -- packets over the limit are dropped
+// silently rather than reaching send_message's handler at all. 20MB
+// gives that headroom without leaving the limit effectively unbounded.
+const io = new Server(server, { cors: { origin: '*' }, maxHttpBufferSize: 20 * 1024 * 1024 });
 
 // orderId -> { customer, order, messages: [...], status: 'active'|'completed', createdAt }
 const sessions = new Map();
@@ -203,7 +209,7 @@ app.post('/api/sessions', (req, res) => {
   if (firstMessage) {
     messages.push({
       from: 'admin',
-      text: 'ჩვენო ძვირფასო მომხმარებელო, ადმინისტრატორი მალე ნახავს თქვენს შეკვეთას <3',
+      text: 'ჩვენო ძვირფასო მომხმარებელო, ადმინისტრატორი მალე ნახავს თქვენს შეკვეთას ❤️ მანამდე გთხოვთ აირჩიოთ გადახდის მეთოდი და როცა გადახდას განახორციელებთ სასურველია დამადასტურებელი სქრინშოთი გამოაგზავნოთ❤️',
       ts: Date.now() + 1 // +1ms so it always sorts strictly after firstMessage even on same-millisecond creation
     });
   }
@@ -249,6 +255,21 @@ app.get('/api/sessions/:orderId', (req, res) => {
   const session = sessions.get(req.params.orderId);
   if (!session) return res.status(404).json({ error: 'not found' });
   res.json(publicSession(req.params.orderId, session));
+});
+
+// Customer's own "Cancel order" button on the site calls this directly
+// (as a fallback/complement to the cancel_order socket event below, in
+// case the socket round-trip doesn't land before the tab reloads).
+// Actually removes the session rather than just marking it inactive --
+// a cancelled order has nothing worth keeping, and the site is relying
+// on this to make /api/sessions/by-customer stop finding it so the
+// "you have an active chat" bubble doesn't just bring the same
+// "cancelled" chat right back on the next page load. Idempotent:
+// deleting an orderId that's already gone (or never existed) is not an
+// error, same as calling this twice in a row from a flaky connection.
+app.delete('/api/sessions/:orderId', (req, res) => {
+  const existed = sessions.delete(req.params.orderId);
+  res.json({ ok: true, existed });
 });
 
 // Admin panel / Android app: list every currently-active chat.
@@ -301,6 +322,22 @@ io.on('connection', (socket) => {
       text: String(message.text || '').slice(0, 2000),
       ts: Date.now()
     };
+    // Photos/videos travel as data: URLs from the site (photos already
+    // downsized client-side; video capped hard at 12MB raw, since this
+    // server keeps every session in plain memory with no database
+    // behind it -- see MESSENGER_VIDEO_MAX_BYTES on the site side).
+    // Passed through as-is, unlike text: slicing a base64 string at an
+    // arbitrary character count would corrupt it into something that
+    // can no longer decode as an image/video at all. The startsWith
+    // checks are a cheap sanity check, not real validation -- just
+    // enough to stop a stray non-data-URL string from being stored as
+    // if it were a real attachment.
+    if (typeof message.image === 'string' && message.image.startsWith('data:image/')) {
+      stored.image = message.image;
+    }
+    if (typeof message.video === 'string' && message.video.startsWith('data:video/')) {
+      stored.video = message.video;
+    }
     session.messages.push(stored);
     io.to(orderId).emit('new_message', stored);
     // Lets the admin side show an unread badge / trigger a push
@@ -315,7 +352,7 @@ io.on('connection', (socket) => {
     // only reaches a currently-open tab/app. Only fires for customer
     // messages; the admin doesn't need a push for their own reply.
     if (stored.from === 'customer') {
-      notifyAdminsOfNewMessage(orderId, session.customer?.username, stored.text);
+      notifyAdminsOfNewMessage(orderId, session.customer?.username, stored.text || (stored.image ? '📷 ფოტო' : stored.video ? '🎥 ვიდეო' : ''));
     }
   });
 
@@ -326,6 +363,20 @@ io.on('connection', (socket) => {
     if (!session) return;
     session.status = 'completed';
     io.to(orderId).emit('order_completed');
+  });
+
+  // Customer's own "Cancel order" button. Unlike complete_order above,
+  // this deletes the session outright rather than just changing its
+  // status -- there's nothing worth keeping about a cancelled order,
+  // and the site depends on the session actually being gone so it stops
+  // turning up in /api/sessions/by-customer on the customer's next page
+  // load. Same trust model as complete_order: whichever side is
+  // connected to this room can call this; the site is what's
+  // responsible for only exposing the button to the customer.
+  socket.on('cancel_order', ({ orderId }) => {
+    if (!orderId || !sessions.has(orderId)) return;
+    sessions.delete(orderId);
+    io.to(orderId).emit('order_cancelled');
   });
 
   socket.on('disconnect', () => {});
