@@ -163,6 +163,10 @@ async function notifyAdminsOfNewMessage(orderId, customerName, text) {
 }
 
 const app = express();
+// Render sits in front of this app as a reverse proxy -- without this,
+// req.ip would be Render's own internal proxy address on every request,
+// not the actual visitor's IP.
+app.set('trust proxy', true);
 app.use(cors());
 app.use(express.json());
 
@@ -185,8 +189,30 @@ function publicSession(orderId, session) {
     order: session.order,
     messages: session.messages,
     status: session.status,
-    createdAt: session.createdAt
+    createdAt: session.createdAt,
+    // Meant for the admin's own view only -- the site decides not to
+    // render these for the customer's own chat, the same soft
+    // trust-the-frontend model every other role-gated action here
+    // already relies on (there's no per-role auth at this layer).
+    customerIp: session.customerIp || null,
+    customerLocation: session.customerLocation || null
   };
+}
+
+// Best-effort IP -> approximate city/region lookup via a free, no-signup
+// API. This is NOT precise location -- there's no GPS-level accuracy to
+// be had from an IP address at all, only a rough city/ISP-level guess,
+// and it can be wrong entirely for a mobile carrier, corporate network,
+// or anyone on a VPN. A support-side hint, never something to rely on.
+async function lookupIpLocation(ip){
+  try {
+    const res = await fetch(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,country,regionName,city,isp`);
+    const data = await res.json();
+    if (!data || data.status !== 'success') return null;
+    return { country: data.country || '', region: data.regionName || '', city: data.city || '', isp: data.isp || '' };
+  } catch(e) {
+    return null;
+  }
 }
 
 // ---------------- REST ----------------
@@ -225,7 +251,9 @@ app.post('/api/sessions', (req, res) => {
     order,    // { type, tiktok, price, details, ... } -- whatever the site already built for the old WA/TG message text
     messages,
     status: 'active',
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    customerIp: req.ip || null,
+    customerLocation: null // filled in below, once the lookup resolves
   };
   sessions.set(orderId, session);
   io.to('admin_room').emit('new_session', publicSession(orderId, session));
@@ -238,6 +266,19 @@ app.post('/api/sessions', (req, res) => {
     notifyAdminsOfNewMessage(orderId, customer?.username, firstMessage.text || '');
   }
   res.json({ ok: true, orderId });
+
+  // Fired after the response above, not awaited by it -- the admin's
+  // support-side location hint is a nice-to-have, never something the
+  // customer should be kept waiting on. If it resolves before the admin
+  // opens the chat, GET /api/sessions/:orderId already has it; if the
+  // admin's already looking at the chat, join_admin's room just doesn't
+  // get a live update for it (a reload picks it up).
+  if (session.customerIp) {
+    lookupIpLocation(session.customerIp).then(loc => {
+      const s = sessions.get(orderId);
+      if (s) s.customerLocation = loc;
+    }).catch(() => {});
+  }
 });
 
 // Looked up right after Discord login (and on page load, if already
