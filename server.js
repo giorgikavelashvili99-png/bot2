@@ -347,11 +347,30 @@ app.post('/api/admin/fcm-token', (req, res) => {
 
 // ---------------- Socket.io ----------------
 
+// Tells the room who's currently connected as which role, whenever that
+// changes (a join or a disconnect) -- powers the site's online-status
+// dot. Presence is tracked per session rather than globally since "is
+// the admin online" only means anything in the context of one specific
+// order's room.
+function broadcastPresence(orderId) {
+  const session = sessions.get(orderId);
+  if (!session || !session.presence) return;
+  io.to(orderId).emit('presence', {
+    adminOnline: session.presence.admin.size > 0,
+    customerOnline: session.presence.customer.size > 0
+  });
+}
+
 io.on('connection', (socket) => {
-  socket.on('join_order', ({ orderId }) => {
+  socket.on('join_order', ({ orderId, role }) => {
     if (!orderId || !sessions.has(orderId)) return;
     socket.join(orderId);
     socket.data.orderId = orderId;
+    socket.data.role = role === 'admin' ? 'admin' : 'customer';
+    const session = sessions.get(orderId);
+    if (!session.presence) session.presence = { admin: new Set(), customer: new Set() };
+    session.presence[socket.data.role].add(socket.id);
+    broadcastPresence(orderId);
   });
 
   // The admin panel (site or Android app) joins this room once to
@@ -455,7 +474,59 @@ io.on('connection', (socket) => {
     io.to(orderId).emit('message_deleted', { messageId });
   });
 
-  socket.on('disconnect', () => {});
+  // Typing indicator: relayed to everyone else in the room (never back
+  // to the sender) with no server-side state kept at all -- the site
+  // handles its own auto-hide-after-a-few-seconds timing, so there's
+  // nothing here that needs an explicit stop_typing counterpart.
+  socket.on('typing', ({ orderId }) => {
+    if (!orderId || !socket.data.role) return;
+    socket.to(orderId).emit('typing', { from: socket.data.role });
+  });
+
+  // Read receipt: records when this role last had the chat open/visible,
+  // and tells the other side so it can mark its own latest message as
+  // seen. Only the timestamp is kept (not a per-message flag) -- exactly
+  // like most chat apps, "seen" is a single high-water mark, not a
+  // separate receipt per message.
+  socket.on('mark_read', ({ orderId }) => {
+    const session = sessions.get(orderId);
+    if (!session || !socket.data.role) return;
+    session.lastRead = session.lastRead || {};
+    session.lastRead[socket.data.role] = Date.now();
+    socket.to(orderId).emit('read_receipt', { from: socket.data.role, ts: session.lastRead[socket.data.role] });
+  });
+
+  // Reactions: one emoji per person per message, same as most chat
+  // apps -- tapping the same emoji again removes it, picking a
+  // different one replaces whichever this person had before. Stored on
+  // the message itself so it's part of the normal history fetch with no
+  // separate lookup needed.
+  socket.on('react_message', ({ orderId, messageId, emoji }) => {
+    const session = sessions.get(orderId);
+    if (!session || !messageId || !emoji || !socket.data.role) return;
+    const msg = session.messages.find(m => m.id === messageId);
+    if (!msg) return;
+    msg.reactions = msg.reactions || {};
+    if (msg.reactions[socket.data.role] === emoji) {
+      delete msg.reactions[socket.data.role];
+    } else {
+      msg.reactions[socket.data.role] = emoji;
+    }
+    io.to(orderId).emit('message_reacted', { messageId, reactions: msg.reactions });
+  });
+
+  // Cleans up presence so a closed tab/app doesn't leave a stale
+  // "online" dot showing on the other side -- the same join/leave
+  // bookkeeping broadcastPresence relies on, just in reverse.
+  socket.on('disconnect', () => {
+    const { orderId, role } = socket.data;
+    if (!orderId || !role) return;
+    const session = sessions.get(orderId);
+    if (session && session.presence && session.presence[role]) {
+      session.presence[role].delete(socket.id);
+      broadcastPresence(orderId);
+    }
+  });
 });
 
 const PORT = process.env.PORT || 3000;
