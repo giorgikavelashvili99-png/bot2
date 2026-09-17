@@ -19,6 +19,7 @@ const express = require('express');
 const http = require('http');
 const cors = require('cors');
 const { Server } = require('socket.io');
+const crypto = require('crypto');
 
 // ---------------- Push notifications (FCM) ----------------
 // Optional and self-disabling: if FIREBASE_SERVICE_ACCOUNT_JSON isn't set
@@ -199,7 +200,12 @@ app.post('/api/sessions', (req, res) => {
   if (!orderId || !customer) {
     return res.status(400).json({ error: 'orderId and customer are required' });
   }
-  const messages = firstMessage ? [firstMessage] : [];
+  const messages = [];
+  if (firstMessage) {
+    messages.push(Object.assign({}, firstMessage, {
+      id: (typeof firstMessage.id === 'string' && firstMessage.id) ? firstMessage.id.slice(0, 100) : crypto.randomUUID()
+    }));
+  }
   // Auto-reply -- fires the instant a new order comes in, before any
   // human on the admin side has even seen it, so the customer gets
   // immediate acknowledgement instead of a silent wait. Sent as
@@ -208,6 +214,7 @@ app.post('/api/sessions', (req, res) => {
   // having replied, which is what it actually is.
   if (firstMessage) {
     messages.push({
+      id: crypto.randomUUID(),
       from: 'admin',
       text: 'ჩვენო ძვირფასო მომხმარებელო, ადმინისტრატორი მალე ნახავს თქვენს შეკვეთას ❤️ მანამდე გთხოვთ აირჩიოთ გადახდის მეთოდი და როცა გადახდას განახორციელებთ სასურველია დამადასტურებელი სქრინშოთი გამოაგზავნოთ❤️',
       ts: Date.now() + 1 // +1ms so it always sorts strictly after firstMessage even on same-millisecond creation
@@ -318,6 +325,7 @@ io.on('connection', (socket) => {
     const session = sessions.get(orderId);
     if (!session || session.status !== 'active' || !message) return;
     const stored = {
+      id: (typeof message.id === 'string' && message.id) ? message.id.slice(0, 100) : crypto.randomUUID(),
       from: message.from, // 'customer' | 'admin'
       text: String(message.text || '').slice(0, 2000),
       ts: Date.now()
@@ -337,6 +345,17 @@ io.on('connection', (socket) => {
     }
     if (typeof message.video === 'string' && message.video.startsWith('data:video/')) {
       stored.video = message.video;
+    }
+    // A small reference to the quoted message only (id + a short text
+    // preview + who sent it) -- never the replied-to message's own
+    // image/video, so quoting a photo doesn't double the payload size
+    // of every reply to it.
+    if (message.replyTo && typeof message.replyTo === 'object' && message.replyTo.id) {
+      stored.replyTo = {
+        id: String(message.replyTo.id),
+        from: message.replyTo.from === 'admin' ? 'admin' : 'customer',
+        preview: String(message.replyTo.preview || '').slice(0, 200)
+      };
     }
     session.messages.push(stored);
     io.to(orderId).emit('new_message', stored);
@@ -377,6 +396,22 @@ io.on('connection', (socket) => {
     if (!orderId || !sessions.has(orderId)) return;
     sessions.delete(orderId);
     io.to(orderId).emit('order_cancelled');
+  });
+
+  // Long-press "Delete" on a message bubble. Only removes a message
+  // whose stored `from` matches the `from` the request claims to be
+  // deleting as -- same soft trust model as everything else here (there's
+  // no real auth layer at the socket level), but this at least stops one
+  // side's UI from being able to silently delete the other side's
+  // message by id if it somehow got hold of it.
+  socket.on('delete_message', ({ orderId, messageId, from }) => {
+    const session = sessions.get(orderId);
+    if (!session || !messageId) return;
+    const idx = session.messages.findIndex(m => m.id === messageId);
+    if (idx === -1) return;
+    if (session.messages[idx].from !== from) return;
+    session.messages.splice(idx, 1);
+    io.to(orderId).emit('message_deleted', { messageId });
   });
 
   socket.on('disconnect', () => {});
