@@ -363,10 +363,11 @@ app.post('/api/activity', express.text({ type: '*/*', limit: '2kb' }), (req, res
   const discordId = clean(b.discordId);
   const detail = clean(b.detail);
   if (!['join', 'leave', 'optimizing'].includes(type) || !discordId) return res.sendStatus(400);
+  console.log(`[MOON] activity received: ${type} / ${name} / ${discordId}`);
 
   const key = req.ip + type + discordId;
   const now = Date.now();
-  if (now - (activityLastHit.get(key) || 0) < 15000) return res.json({ ok: true, skipped: true });
+  if (now - (activityLastHit.get(key) || 0) < 15000) { console.log('[MOON] activity skipped (15s rate limit)'); return res.json({ ok: true, skipped: true }); }
   activityLastHit.set(key, now);
   if (activityLastHit.size > 5000) activityLastHit.clear();
 
@@ -390,6 +391,7 @@ app.post('/api/activity', express.text({ type: '*/*', limit: '2kb' }), (req, res
         notification: { channelId: 'moon_activity', tag: 'activity:' + discordId }
       }
     }).then(resp => {
+      console.log(`[MOON] activity push: ${resp.responses.filter(r => r.success).length}/${tokens.length} accepted by FCM`);
       let pruned = false;
       resp.responses.forEach((r, i) => {
         if (!r.success) console.log(`[MOON] activity push failed for ...${tokens[i].slice(-12)}: ${r.error?.code || r.error?.message}`);
