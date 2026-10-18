@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="ka">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b0d">
+<title>MOON AI</title>
+<style>
+  :root {
+    --bg: #0b0b0d;
+    --surface: #131316;
+    --surface2: #1a1a1f;
+    --line: #232328;
+    --line2: #34343c;
+    --text: #ececf0;
+    --body: #dcdce2;
+    --muted: #8b8b96;
+    --accent: #a9bbff;
+    --ease: cubic-bezier(.22, .8, .24, 1);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg) radial-gradient(70% 38% at 50% 0%, rgba(169,187,255,.065), rgba(169,187,255,0)) no-repeat;
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Georgian", "Helvetica Neue", sans-serif;
+    display: flex; flex-direction: column; height: 100dvh; overflow: hidden;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; background: none; border: 0; }
+  svg { display: block; }
+
+  /* ზედა ზოლი */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 22px; padding-top: calc(14px + env(safe-area-inset-top));
+    border-bottom: 1px solid transparent; transition: border-color .25s;
+  }
+  header.scrolled { border-bottom-color: var(--line); }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand svg { width: 22px; height: 22px; color: var(--text); }
+  .brand b { font-size: 14px; font-weight: 600; letter-spacing: .32em; text-indent: .04em; }
+  .icon {
+    width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; color: var(--muted);
+    transition: color .18s, background .18s;
+  }
+  .icon:hover { color: var(--text); background: var(--surface2); }
+  .icon:active { transform: scale(.94); }
+
+  /* საუბარი */
+  #chat { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 18px 20px 12px; }
+  .wrap { max-width: 740px; margin: 0 auto; display: flex; flex-direction: column; gap: 30px; min-height: 100%; }
+
+  .hero { margin: auto 0; padding: 4vh 0 2vh; animation: fade .6s var(--ease) both; }
+  .hero .eyebrow { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12.5px; letter-spacing: .3em; font-weight: 600; margin-bottom: 18px; }
+  .hero .eyebrow svg { width: 20px; height: 20px; }
+  .hero h1 { font-size: clamp(30px, 6.4vw, 46px); font-weight: 600; letter-spacing: -.015em; line-height: 1.15; }
+  .hero h1 span { color: var(--muted); font-weight: 500; }
+  .ideas { margin-top: 34px; border-top: 1px solid var(--line); }
+  .idea {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%;
+    padding: 16px 4px; border-bottom: 1px solid var(--line); text-align: left; font-size: 15.5px; color: var(--body);
+    transition: color .18s, padding .25s var(--ease);
+  }
+  .idea svg { width: 16px; height: 16px; color: var(--muted); flex: none; transition: transform .25s var(--ease), color .18s; }
+  .idea:hover { color: var(--text); padding-left: 10px; }
+  .idea:hover svg { color: var(--accent); transform: translateX(4px); }
+
+  .msg { animation: fade .3s var(--ease) both; }
+  .msg.instant { animation: none; }
+  @keyframes fade { from { opacity: 0; transform: translate3d(0, 8px, 0); } to { opacity: 1; transform: none; } }
+  .msg.user { display: flex; justify-content: flex-end; }
+  .msg.user .bubble {
+    max-width: min(560px, 86%); background: var(--surface2); border: 1px solid var(--line);
+    border-radius: 20px 20px 6px 20px; padding: 11px 17px; white-space: pre-wrap; line-height: 1.6; font-size: 15.5px;
+    overflow-wrap: anywhere;
+  }
+  .msg.bot .bubble { color: var(--body); line-height: 1.8; font-size: 16px; overflow-wrap: anywhere; }
+  .bubble > :first-child { margin-top: 0; }
+  .bubble p { margin: 0 0 12px; }
+  .bubble p:last-child { margin-bottom: 0; }
+  .bubble h2, .bubble h3, .bubble h4 { color: var(--text); margin: 20px 0 8px; line-height: 1.3; font-weight: 600; }
+  .bubble h2 { font-size: 21px; } .bubble h3 { font-size: 18.5px; } .bubble h4 { font-size: 16.5px; }
+  .bubble ul, .bubble ol { margin: 4px 0 14px; padding-left: 22px; }
+  .bubble li { margin: 4px 0; padding-left: 2px; }
+  .bubble li::marker { color: var(--muted); }
+  .bubble strong { color: var(--text); font-weight: 650; }
+  .bubble a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(169,187,255,.35); }
+  .bubble :not(pre) > code {
+    background: var(--surface2); border: 1px solid var(--line); padding: 1px 6px; border-radius: 6px;
+    font-size: 13.5px; font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--text);
+  }
+  .code { margin: 14px 0; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: #0e0e11; }
+  .code-h {
+    display: flex; justify-content: space-between; align-items: center; padding: 8px 14px;
+    border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); direction: ltr; letter-spacing: .04em;
+  }
+  .code-h button { color: var(--muted); font-size: 12px; padding: 2px 4px; transition: color .18s; }
+  .code-h button:hover { color: var(--text); }
+  .code pre { padding: 14px 16px; overflow-x: auto; direction: ltr; text-align: left; font-size: 13.5px; line-height: 1.65; }
+  .code code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px; line-height: 1.65; color: #e6e6ea; }
+
+
+  /* სიტყვები რბილად ამოდის: მხოლოდ opacity, ამიტომ ლაგის გარეშეა და ტექსტი არ ცახცახებს */
+  .w, .blk { animation: wIn .9s cubic-bezier(.3, .6, .3, 1) both; }
+  @keyframes wIn { from { opacity: 0; } to { opacity: 1; } }
+
+  .jump {
+    position: fixed; left: 50%; bottom: calc(104px + env(safe-area-inset-bottom)); z-index: 5;
+    width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--surface2); border: 1px solid var(--line2); color: var(--text);
+    opacity: 0; pointer-events: none; transform: translate3d(-50%, 8px, 0);
+    transition: opacity .22s, transform .25s var(--ease);
+  }
+  .jump.show { opacity: 1; pointer-events: auto; transform: translate3d(-50%, 0, 0); }
+  .jump:hover { border-color: var(--a1, var(--accent)); }
+
+  .sources { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; animation: fade .45s var(--ease) both; }
+  .sources span { font-size: 12px; color: var(--muted); letter-spacing: .1em; margin-right: 2px; }
+  .sources a {
+    font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px;
+    text-decoration: none; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    transition: color .18s, border-color .18s;
+  }
+  .sources a:hover { color: var(--text); border-color: var(--line2); }
+  .thinking { display: inline-flex; gap: 6px; padding: 10px 0; }
+  .thinking i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: breathe 1.2s ease-in-out infinite; }
+  .thinking i:nth-child(2) { animation-delay: .18s; } .thinking i:nth-child(3) { animation-delay: .36s; }
+  @keyframes breathe { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+
+  .actions { display: flex; gap: 4px; margin-top: 10px; opacity: 0; transition: opacity .2s; }
+  .msg.bot:hover .actions, .msg.bot:focus-within .actions { opacity: 1; }
+  @media (hover: none) { .actions { opacity: 1; } }
+  .act { height: 30px; padding: 0 9px; border-radius: 9px; display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12.5px; transition: color .18s, background .18s; }
+  .act:hover { color: var(--text); background: var(--surface2); }
+  .act svg { width: 15px; height: 15px; }
+  .err { color: #ff8f9f; }
+
+  /* შეყვანა */
+  footer { padding: 8px 20px calc(14px + env(safe-area-inset-bottom)); }
+  .composer {
+    max-width: 740px; margin: 0 auto; display: flex; align-items: flex-end; gap: 8px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 26px; padding: 8px 8px 8px 22px;
+    transition: border-color .2s;
+  }
+  .composer:focus-within { border-color: var(--line2); }
+  textarea {
+    flex: 1; resize: none; max-height: 190px; min-height: 28px; background: none; border: 0; outline: 0;
+    color: var(--text); font: inherit; font-size: 16px; line-height: 1.55; padding: 8px 0; caret-color: var(--accent);
+  }
+  textarea::placeholder { color: var(--muted); }
+  #send {
+    width: 40px; height: 40px; border-radius: 50%; background: var(--text); color: #0b0b0d; display: grid; place-items: center; flex: none;
+    transition: transform .18s var(--ease), opacity .2s, background .2s;
+  }
+  #send:hover:not(:disabled) { transform: scale(1.06); }
+  #send:active:not(:disabled) { transform: scale(.92); }
+  #send:disabled { background: var(--surface2); color: var(--muted); cursor: default; }
+  .hint { max-width: 740px; margin: 9px auto 0; text-align: center; font-size: 11.5px; color: var(--muted); opacity: .75; }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  @media (max-width: 560px) {
+    header { padding-left: 16px; padding-right: 12px; }
+    #chat { padding-left: 16px; padding-right: 16px; }
+    footer { padding-left: 12px; padding-right: 12px; }
+    .hint { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001s !important; animation-iteration-count: 1 !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header id="top">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V5l8 9 8-9v14"/></svg>
+    <b>MOON AI</b>
+  </div>
+</header>
+
+<main id="chat"><div class="wrap" id="wrap"></div></main>
+
+<button class="jump" id="jump" aria-label="ქვემოთ ჩასვლა">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+</button>
+
+<footer>
+  <div class="composer">
+    <textarea id="input" rows="1" placeholder="დაწერე შეკითხვა..." aria-label="შეკითხვა"></textarea>
+    <button id="send" aria-label="გაგზავნა" disabled></button>
+  </div>
+  <div class="hint">MOON AI შეიძლება შეცდეს. მნიშვნელოვანი ინფორმაცია გადაამოწმე.</div>
+</footer>
+
+<script>
+(function () {
+  // თუ Index.html სერვერისგან განცალკევებით ჰოსტდება (მაგ. GitHub Pages),
+  // ჩაწერე სერვერის მისამართი, მაგ: "https://შენი-სერვისი.onrender.com/api/chat"
+  const API_URL = "/api/chat";
+
+  const MARK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5l8 9 8-9v14"/></svg>';
+  const SEND_ICON = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+  const STOP_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>';
+  const COPY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>';
+  const ARROW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
+
+  const IDEAS = [
+    "მოკლედ ამიხსენი, როგორ მუშაობს ინტერნეტი",
+    "დამეხმარე ბიზნეს იდეის გამოგონებაში",
+    "დამიწერე მოკლე ელფოსტა კლიენტისთვის",
+    "ახსენი JavaScript-ის ძირითადი ცნებები"
+  ];
+
+  const chatEl = document.getElementById("chat");
+  const wrap = document.getElementById("wrap");
+  const inputEl = document.getElementById("input");
+  const sendBtn = document.getElementById("send");
+  const topEl = document.getElementById("top");
+  const jumpEl = document.getElementById("jump");
+
+  let messages = [];
+  let busy = false;
+  let ctrl = null;
+  let stick = true;
+
+  // საუბარი აღარ ინახება: გვერდის განახლებისას ყოველთვის სუფთა ჩატი იწყება (ძველ შენახულსაც ვშლით)
+  try { localStorage.removeItem("moon_ai_history"); } catch (e) {}
+
+  /*MD_START*/
+  function esc(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function inline(s) {
+    const codes = [];
+    s = s.replace(/`([^`\n]+)`/g, (m, c) => { codes.push(c); return "\u0001" + (codes.length - 1) + "\u0001"; });
+    s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/(^|[^*])\*([^*\s][^*\n]*)\*(?!\*)/g, "$1<em>$2</em>");
+    s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    return s.replace(/\u0001(\d+)\u0001/g, (m, i) => "<code>" + codes[i] + "</code>");
+  }
+  const TEX = { rightarrow: "\u2192", to: "\u2192", longrightarrow: "\u2192", Rightarrow: "\u21D2", leftarrow: "\u2190", Leftarrow: "\u21D0",
+    leftrightarrow: "\u2194", times: "\u00D7", approx: "\u2248", neq: "\u2260", leq: "\u2264", geq: "\u2265", cdot: "\u00B7", ldots: "\u2026" };
+  function tex(s) {
+    return s.replace(/\$\s*\\([A-Za-z]+)\s*\$/g, (m, k) => TEX[k] || m).replace(/\\(rightarrow|leftarrow|Rightarrow|leftrightarrow)\b/g, (m, k) => TEX[k]);
+  }
+  function md(src) {
+    src = tex(src);
+    const blocks = [];
+    let t = src.replace(/```([\w+#.-]*)[^\S\n]*\n?([\s\S]*?)(```|$)/g, (m, lang, code) => {
+      blocks.push({ lang, code: code.replace(/\n$/, "") });
+      return "\n\u0000" + (blocks.length - 1) + "\u0000\n";
+    });
+    t = esc(t);
+    let out = "", list = null;
+    const close = () => { if (list) { out += "</" + list + ">"; list = null; } };
+    for (const line of t.split("\n")) {
+      let m;
+      if ((m = line.match(/^\u0000(\d+)\u0000$/))) {
+        close();
+        const b = blocks[+m[1]];
+        out += '<div class="code"><div class="code-h"><span>' + esc(b.lang || "code") +
+          '</span><button data-copy-code>კოპირება</button></div><pre><code>' + esc(b.code) + "</code></pre></div>";
+      } else if ((m = line.match(/^\s{0,3}(#{1,3})\s+(.*)$/))) {
+        close();
+        const lv = m[1].length + 1;
+        out += "<h" + lv + ">" + inline(m[2]) + "</h" + lv + ">";
+      } else if ((m = line.match(/^\s*[-*•]\s+(.*)$/))) {
+        if (list !== "ul") { close(); out += "<ul>"; list = "ul"; }
+        out += "<li>" + inline(m[1]) + "</li>";
+      } else if ((m = line.match(/^\s*\d+[.)]\s+(.*)$/))) {
+        if (list !== "ol") { close(); out += "<ol>"; list = "ol"; }
+        out += "<li>" + inline(m[1]) + "</li>";
+      } else if (!line.trim()) {
+        close();
+      } else {
+        close();
+        out += "<p>" + inline(line) + "</p>";
+      }
+    }
+    close();
+    return out;
+  }
+  /*MD_END*/
+
+  function nearBottom() { return chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 60; }
+  let lastTop = 0;
+  chatEl.addEventListener("scroll", () => {
+    const top = chatEl.scrollTop;
+    // თუ მომხმარებელი ზემოთ ადის, ავტომატურ ჩამოსვლას ვთიშავთ (პასუხი ფონზე მაინც იწერება);
+    // როცა ისევ ბოლოში მივა, ისევ ჩაირთვება
+    if (top < lastTop - 2) stick = false;
+    else if (nearBottom()) stick = true;
+    lastTop = top;
+    topEl.classList.toggle("scrolled", top > 4);
+    jumpEl.classList.toggle("show", !nearBottom());
+  }, { passive: true });
+  function toBottom(force) {
+    if (force) stick = true;
+    if (stick) chatEl.scrollTop = chatEl.scrollHeight;
+  }
+  jumpEl.addEventListener("click", () => { toBottom(true); });
+
+  function syncSend() {
+    sendBtn.innerHTML = busy ? STOP_ICON : SEND_ICON;
+    sendBtn.disabled = !busy && !inputEl.value.trim();
+    sendBtn.setAttribute("aria-label", busy ? "გაჩერება" : "გაგზავნა");
+  }
+
+  function showHero() {
+    wrap.innerHTML = "";
+    const h = document.createElement("div");
+    h.className = "hero";
+    h.innerHTML = '<div class="eyebrow">' + MARK + 'MOON AI</div><h1>როგორ დაგეხმარო <span>დღეს?</span></h1>';
+    const list = document.createElement("div");
+    list.className = "ideas";
+    IDEAS.forEach(s => {
+      const b = document.createElement("button");
+      b.className = "idea";
+      b.innerHTML = "<span></span>" + ARROW;
+      b.firstChild.textContent = s;
+      b.addEventListener("click", () => { inputEl.value = s; send(); });
+      list.appendChild(b);
+    });
+    h.appendChild(list);
+    wrap.appendChild(h);
+  }
+
+  function addUser(text, instant) {
+    const el = document.createElement("div");
+    el.className = "msg user" + (instant ? " instant" : "");
+    const b = document.createElement("div");
+    b.className = "bubble"; b.textContent = text;
+    el.appendChild(b); wrap.appendChild(el);
+    return el;
+  }
+  function addBot(text, instant) {
+    const el = document.createElement("div");
+    el.className = "msg bot" + (instant ? " instant" : "");
+    el.innerHTML = '<div class="bubble"></div><div class="actions"></div>';
+    el._bubble = el.querySelector(".bubble");
+    el._actions = el.querySelector(".actions");
+    if (text) el._bubble.innerHTML = md(text);
+    wrap.appendChild(el);
+    if (text) addActions(el, text);
+    return el;
+  }
+  function addActions(el, text) {
+    el._actions.innerHTML = "";
+    const b = document.createElement("button");
+    b.className = "act"; b.innerHTML = COPY_ICON + "<span>კოპირება</span>";
+    b.addEventListener("click", () => {
+      copyText(text);
+      b.querySelector("span").textContent = "დაკოპირდა";
+      setTimeout(() => { b.querySelector("span").textContent = "კოპირება"; }, 1500);
+    });
+    el._actions.appendChild(b);
+  }
+  function copyText(t) {
+    if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(t).catch(() => {}); return; }
+    const ta = document.createElement("textarea");
+    ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); } catch (e) {}
+    ta.remove();
+  }
+  wrap.addEventListener("click", e => {
+    const btn = e.target.closest("[data-copy-code]");
+    if (!btn) return;
+    copyText(btn.closest(".code").querySelector("code").textContent);
+    btn.textContent = "დაკოპირდა";
+    setTimeout(() => { btn.textContent = "კოპირება"; }, 1500);
+  });
+
+  function redraw() {
+    wrap.innerHTML = "";
+    if (!messages.length) { showHero(); return; }
+    messages.forEach(m => m.role === "user" ? addUser(m.content, true) : addBot(m.content, true));
+    toBottom(true);
+  }
+
+  const WORD_MS = 900; // ერთი სიტყვის გამოჩენის ხანგრძლივობა (უნდა ემთხვეოდეს CSS-ის .w ანიმაციას)
+  const REDUCE = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // პასუხის მშვიდი გამოჩენა: სიტყვები რბილად "ამოდის" (opacity), კითხვის კომფორტული ტემპით.
+  // არსებულ DOM-ს არასდროს ვანადგურებთ: მხოლოდ ახალ სიტყვებს ვამატებთ, ამიტომ ანიმაცია არ წყდება და არ ციმციმებს.
+  function createReveal(el) {
+    let full = "", cut = 0, done = false, stopped = false, completed = false, started = false;
+    let raf = 0, last = 0, acc = 0, lastPaint = 0, dirty = false;
+    const blocks = [];
+    let resolveFinished;
+    const finished = new Promise(r => { resolveFinished = r; });
+
+    function advance(n) {
+      const re = /\s*\S+/g;
+      re.lastIndex = cut;
+      while (n > 0) {
+        const m = re.exec(full);
+        if (!m) break;
+        // ბოლო სიტყვა შეიძლება ჯერ არ მოსულიყო სრულად
+        if (!done && re.lastIndex >= full.length && !/\s$/.test(full)) break;
+        cut = re.lastIndex; n--;
+      }
+      if (done && !/\S/.test(full.slice(cut))) cut = full.length;
+    }
+
+    // ყოველ სიტყვას ცალკე span-ში ვხვევთ, რომ თითოეულმა საკუთარი ანიმაცია გაიაროს
+    function wrapWords(root) {
+      if (root.classList && root.classList.contains("code")) { root.classList.add("blk"); return root; }
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      let n;
+      while ((n = walker.nextNode())) {
+        if (n.parentNode.closest && n.parentNode.closest(".code")) continue;
+        if (/\S/.test(n.nodeValue)) nodes.push(n);
+      }
+      for (const node of nodes) {
+        const text = node.nodeValue;
+        const frag = document.createDocumentFragment();
+        const re = /\S+/g;
+        let m, idx = 0;
+        while ((m = re.exec(text))) {
+          if (m.index > idx) frag.append(text.slice(idx, m.index));
+          const s = document.createElement("span");
+          s.className = "w";
+          s.textContent = m[0];
+          frag.append(s);
+          idx = m.index + m[0].length;
+        }
+        if (idx < text.length) frag.append(text.slice(idx));
+        node.replaceWith(frag);
+      }
+      return root;
+    }
+
+    // ცოცხალ DOM-ს ახალთან ვადარებთ: უცვლელი კვანძები ხელუხლებელი რჩება (ანიმაცია გრძელდება), ახალი ემატება
+    function morph(live, next) {
+      const ln = live.childNodes, nn = next.childNodes;
+      for (let i = 0; i < nn.length; i++) {
+        const a = ln[i], b = nn[i];
+        if (!a) { live.appendChild(b.cloneNode(true)); continue; }
+        if (a.nodeType === 3 && b.nodeType === 3) {
+          if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue;
+        } else if (a.nodeType === 1 && b.nodeType === 1 && a.tagName === b.tagName) {
+          morph(a, b);
+        } else {
+          live.replaceChild(b.cloneNode(true), a);
+        }
+      }
+      while (ln.length > nn.length) live.removeChild(live.lastChild);
+    }
+
+    // ანიმაციის დასრულების შემდეგ ბლოკს უბრალო ტექსტით ვანაცვლებთ (DOM მსუბუქი რჩება, იერი იგივეა)
+    function settle(rec) {
+      if (stopped || rec.settled) return;
+      rec.settled = true;
+      if (rec.el.parentNode === el) {
+        const p = rec.plain.cloneNode(true);
+        el.replaceChild(p, rec.el);
+        rec.el = p;
+      }
+    }
+
+    function paint() {
+      const tmp = document.createElement("div");
+      tmp.innerHTML = md(full.slice(0, cut));
+      const next = Array.from(tmp.children);
+      if (!started) { started = true; el.innerHTML = ""; el.classList.add("streaming"); }
+      const lastIdx = next.length - 1;
+      const animate = !REDUCE;
+      const fresh = nb => (animate ? wrapWords(nb.cloneNode(true)) : nb.cloneNode(true));
+      for (let i = 0; i < next.length; i++) {
+        const nb = next[i], html = nb.outerHTML;
+        let rec = blocks[i];
+        if (!rec) {
+          const node = fresh(nb);
+          el.appendChild(node);
+          rec = blocks[i] = { el: node, html, plain: nb, settled: false, timer: 0 };
+        } else if (rec.html !== html) {
+          if (rec.el.tagName !== nb.tagName) {
+            const node = fresh(nb);
+            el.replaceChild(node, rec.el);
+            rec.el = node; rec.settled = false;
+          } else if (rec.settled || !animate) {
+            morph(rec.el, nb);
+          } else {
+            morph(rec.el, wrapWords(nb.cloneNode(true)));
+          }
+          rec.html = html; rec.plain = nb;
+        }
+        // ბლოკი, რომლის შემდეგაც სხვა ბლოკი გაჩნდა, დასრულებულია
+        if (i < lastIdx && !rec.settled && !rec.timer) {
+          const r = rec;
+          rec.timer = setTimeout(() => settle(r), WORD_MS + 80);
+        }
+      }
+      while (blocks.length > next.length) {
+        const r = blocks.pop();
+        if (r.el.parentNode === el) el.removeChild(r.el);
+      }
+      toBottom();
+    }
+
+    function schedule() { if (!raf && !stopped) raf = requestAnimationFrame(frame); }
+
+    function frame(t) {
+      raf = 0;
+      if (stopped) return;
+      const dt = Math.min(80, t - (last || t));
+      last = t;
+      const backlog = (full.slice(cut).match(/\S+/g) || []).length;
+      let rate = 16 + backlog * 0.35;                // სიტყვა წამში: მშვიდი ტემპი, რომელიც ჩამორჩენისას ოდნავ ჩქარდება
+      if (done) rate = Math.max(rate, backlog / 6);  // დასრულების შემდეგ დარჩენილი დიდხანს არ გაგრძელდეს
+      rate = REDUCE ? 240 : Math.min(rate, 140);
+      acc += rate * dt / 1000;
+      const n = Math.floor(acc);
+      if (n > 0) {
+        acc -= n;
+        const before = cut;
+        advance(n);
+        if (cut !== before) dirty = true;
+      }
+      const gap = full.length > 8000 ? 50 : 0;       // ძალიან გრძელ ტექსტზე დახატვას ცოტას ვუფრთხილდებით
+      if (dirty && t - lastPaint >= gap) { paint(); lastPaint = t; dirty = false; }
+      if (done && cut >= full.length && !dirty) { complete(); return; }
+      if (cut < full.length || dirty) schedule(); else last = 0;
+    }
+
+    function complete() {
+      if (completed) return;
+      completed = true;
+      // ბოლო სიტყვებს ანიმაცია დავასრულებინოთ, მერე სუფთად ვხატავთ
+      setTimeout(() => {
+        if (!stopped) { el.classList.remove("streaming"); el.innerHTML = md(full); }
+        resolveFinished();
+      }, REDUCE ? 0 : WORD_MS + 80);
+    }
+
+    return {
+      push(text) { full += text; schedule(); },
+      end() { done = true; schedule(); return finished; },
+      shown() { return full.slice(0, cut); },
+      stop() {
+        if (!stopped) {
+          stopped = true;
+          if (raf) cancelAnimationFrame(raf);
+          el.classList.remove("streaming");
+          if (cut > 0) el.innerHTML = md(full.slice(0, cut));
+          resolveFinished();
+        }
+        return full.slice(0, cut);
+      }
+    };
+  }
+
+  function showSources(bot, list) {
+    if (!Array.isArray(list) || !list.length) return;
+    const box = document.createElement("div");
+    box.className = "sources";
+    const label = document.createElement("span");
+    label.textContent = "წყაროები";
+    box.appendChild(label);
+    list.slice(0, 5).forEach(s => {
+      if (!s || typeof s.uri !== "string" || !/^https?:\/\//i.test(s.uri)) return;
+      const a = document.createElement("a");
+      a.href = s.uri; a.target = "_blank"; a.rel = "noopener noreferrer";
+      a.textContent = String(s.title || s.uri);
+      box.appendChild(a);
+    });
+    if (box.children.length > 1) bot.insertBefore(box, bot._actions);
+  }
+
+  let stopFn = null;
+
+  async function send() {
+    if (busy) return;
+    const text = inputEl.value.trim();
+    if (!text) return;
+
+    if (!messages.length) wrap.innerHTML = "";
+    messages.push({ role: "user", content: text });
+    addUser(text);
+    inputEl.value = ""; inputEl.style.height = "auto";
+
+    const bot = addBot("");
+    bot._bubble.innerHTML = '<span class="thinking"><i></i><i></i><i></i></span>';
+    stick = true; toBottom(true);
+
+    busy = true; syncSend();
+    ctrl = new AbortController();
+    const reveal = createReveal(bot._bubble);
+    let answer = "", sources = null, userStopped = false, streamError = "";
+    stopFn = () => { userStopped = true; ctrl.abort(); reveal.stop(); };
+
+    const keep = (finalText) => {
+      messages.push({ role: "assistant", content: finalText });
+      addActions(bot, finalText);
+      showSources(bot, sources);
+    };
+
+    try {
+      let tz = "";
+      try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) {}
+      const res = await fetch(API_URL, {
+        method: "POST", signal: ctrl.signal,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ messages: messages.slice(-30), tz })
+      });
+      if (!res.ok) {
+        let msg = "შეცდომა " + res.status;
+        try { const j = await res.json(); if (j.error) msg = j.error; } catch (e) {}
+        throw new Error(msg);
+      }
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
+          if (!data) continue;
+          try {
+            const ev = JSON.parse(data);
+            if (ev.type === "content_block_delta" && ev.delta && ev.delta.text) {
+              answer += ev.delta.text;
+              reveal.push(ev.delta.text);
+            } else if (ev.type === "sources") {
+              sources = ev.sources;
+            } else if (ev.type === "error" && ev.message) {
+              streamError = String(ev.message);
+            }
+          } catch (e) {}
+        }
+      }
+      if (!answer) throw new Error(streamError || "პასუხი ვერ მივიღე, სცადე თავიდან.");
+      await reveal.end();
+      const finalText = userStopped ? reveal.shown() : answer;
+      if (finalText) keep(finalText); else { bot.remove(); messages.pop(); }
+    } catch (err) {
+      const shown = reveal.stop();
+      if (err.name === "AbortError" || userStopped) {
+        if (shown) keep(shown); else { bot.remove(); messages.pop(); }
+      } else {
+        bot._bubble.innerHTML = '<span class="err">' + esc(err.message || "კავშირის შეცდომა") + "</span>";
+        messages.pop();
+      }
+    } finally {
+      busy = false; ctrl = null; stopFn = null; syncSend(); toBottom();
+      if (matchMedia("(hover: hover)").matches) inputEl.focus();
+    }
+  }
+
+  sendBtn.addEventListener("click", () => { if (busy && stopFn) stopFn(); else send(); });
+  inputEl.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
+  });
+  inputEl.addEventListener("input", () => {
+    inputEl.style.height = "auto";
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 190) + "px";
+    syncSend();
+  });
+  syncSend();
+  redraw();
+})();
+</script>
+</body>
+</html>
