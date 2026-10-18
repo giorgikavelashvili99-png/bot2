@@ -354,6 +354,56 @@ app.post('/api/admin/fcm-token', (req, res) => {
 // person, newer ones replace older ones.
 const activityLastHit = new Map(); // ip+type+discordId -> ts
 
+// Activity history, so the Android app's "Activity" tab can show what
+// happened while it was closed (the socket event below only reaches an
+// app that is open at that moment). Newest first, capped, and mirrored to
+// MantleDB (debounced) so a Render restart / spin-down doesn't wipe it.
+const ACTIVITY_LOG_PATH = 'chat-server-activity-log';
+const ACTIVITY_LOG_MAX = 300;
+let activityLog = [];
+let activityPersistTimer = null;
+
+async function loadPersistedActivityLog() {
+  try {
+    const resp = await fetch(`${MANTLEDB_BASE}/${MANTLEDB_NAMESPACE}/${ACTIVITY_LOG_PATH}`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (Array.isArray(data.list)) activityLog = data.list.slice(0, ACTIVITY_LOG_MAX);
+    console.log(`[MOON] Restored ${activityLog.length} activity entries.`);
+  } catch (e) {
+    console.log('[MOON] Could not load activity log:', e.message);
+  }
+}
+
+function persistActivityLogSoon() {
+  if (activityPersistTimer) return;
+  activityPersistTimer = setTimeout(async () => {
+    activityPersistTimer = null;
+    try {
+      await fetch(`${MANTLEDB_BASE}/${MANTLEDB_NAMESPACE}/${ACTIVITY_LOG_PATH}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ list: activityLog })
+      });
+    } catch (e) {
+      console.log('[MOON] Could not persist activity log:', e.message);
+    }
+  }, 3000);
+}
+
+// Admin app: history of join / leave / optimizing events, newest first.
+app.get('/api/activity', (req, res) => {
+  const limit = Math.max(1, Math.min(ACTIVITY_LOG_MAX, parseInt(req.query.limit, 10) || 150));
+  res.json(activityLog.slice(0, limit));
+});
+
+// Admin app: "clear history" button.
+app.delete('/api/activity', (req, res) => {
+  activityLog = [];
+  persistActivityLogSoon();
+  res.json({ ok: true });
+});
+
 app.post('/api/activity', express.text({ type: '*/*', limit: '2kb' }), (req, res) => {
   let b;
   try { b = JSON.parse(req.body); } catch (e) { return res.sendStatus(400); }
@@ -378,14 +428,20 @@ app.post('/api/activity', express.text({ type: '*/*', limit: '2kb' }), (req, res
   };
   const [title, body] = texts[type];
 
-  io.to('admin_room').emit('admin_activity', { type, username: name, discordId, detail, ts: now });
+  const avatarUrl = String(b.avatarUrl || '').startsWith('https://cdn.discordapp.com/') ? String(b.avatarUrl).slice(0, 300) : '';
+  const entry = { id: crypto.randomUUID(), type, username: name, discordId, detail, avatarUrl, ts: now };
+  activityLog.unshift(entry);
+  if (activityLog.length > ACTIVITY_LOG_MAX) activityLog.length = ACTIVITY_LOG_MAX;
+  persistActivityLogSoon();
+
+  io.to('admin_room').emit('admin_activity', entry);
 
   if (fcmEnabled && adminFcmTokens.size > 0) {
     const tokens = Array.from(adminFcmTokens);
     admin.messaging().sendEachForMulticast({
       tokens,
       notification: { title, body },
-      data: { type: 'activity', username: name, discordId },
+      data: { type: 'activity', activityType: type, username: name, discordId },
       android: {
         priority: 'high',
         notification: { channelId: 'moon_activity', tag: 'activity:' + discordId }
@@ -596,7 +652,7 @@ const PORT = process.env.PORT || 3000;
   // is often a brand new order -- until previously-registered devices
   // are back in adminFcmTokens. See loadPersistedFcmTokens's own comment
   // for why this specific ordering is what the fix actually depends on.
-  await loadPersistedFcmTokens();
+  await Promise.all([loadPersistedFcmTokens(), loadPersistedActivityLog()]);
   server.listen(PORT, () => {
     console.log(`MOON chat server listening on port ${PORT}`);
   });
